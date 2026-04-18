@@ -108,6 +108,77 @@ RealisticRagdoll.esp
 
 ---
 
+## AI Texture Upscaling — DIY Pipeline
+
+The `tools/upscale_textures.py` script in this repository lets you run your
+**own** Fallout 4 texture folder through a locally-executed ESRGAN neural
+network, producing photorealistic upscaled DDS files without uploading
+anything to a cloud service.  Everything runs on your GPU using Vulkan.
+
+### Requirements
+
+| Tool | Platform | Download |
+|---|---|---|
+| **realesrgan-ncnn-vulkan** | Win / Linux / macOS | <https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases> |
+| **texconv** (DDS ↔ PNG) | Windows | <https://github.com/microsoft/DirectXTex/releases> |
+| **ImageMagick** `magick` (DDS ↔ PNG) | Linux / macOS | <https://imagemagick.org/> |
+
+Both tools must be on your system `PATH`, or passed explicitly via
+`--esrgan-bin` / `--dds-converter`.  Run `python tools/verify_install.py`
+to confirm they are detected.
+
+### Workflow
+
+```
+# 1. Dry run to preview which BC format will be used for each texture
+python tools/upscale_textures.py \
+    --input-dir  "C:\Fallout4\Data\Textures\Landscape" \
+    --output-dir "C:\Fallout4\Data\Textures_upscaled\Landscape" \
+    --model 4x_foolhardy_Remacri \
+    --scale 4 \
+    --dry-run
+
+# 2. Full run
+python tools/upscale_textures.py \
+    --input-dir  "C:\Fallout4\Data\Textures\Landscape" \
+    --output-dir "C:\Fallout4\Data\Textures_upscaled\Landscape" \
+    --model 4x_foolhardy_Remacri \
+    --scale 4
+```
+
+After the run completes, copy the contents of `Textures_upscaled\` over your
+existing `Data\Textures\` folder (or install it as a mod via Mod Organizer 2
+so the originals are preserved).
+
+### Model Recommendations by Category
+
+For full model download links and VRAM requirements, see
+`tools/models/README.md`.
+
+| Texture category | Recommended model | Scale | DDS format |
+|---|---|---|---|
+| **Landscape / rocks** (`terrain\`, `landscape\`) | `4x_foolhardy_Remacri` | 4× | BC3 (diffuse), BC5 (normals) |
+| **Vegetation / foliage** | `4x_foolhardy_Remacri` | 4× | BC3 (diffuse) |
+| **Characters / skin** (`actors\`, `characters\`) | `4x_NMKD-Superscale-SP` | 4× | BC3 (diffuse), BC5 (normals) |
+| **Weapons / armour** (`weapons\`, `armor\`) | `4x_foolhardy_Remacri` | 4× | BC3 (diffuse), BC1 (specular) |
+| **Architecture / interiors** | `4x_foolhardy_Remacri` | 4× | BC3 (diffuse) |
+| **Normal maps** (`*_n.dds`) | `4x_NormalNM` | 4× | **BC5** (auto-detected) |
+
+> **Tip:** `upscale_textures.py` detects `_n` / `_normal` / `_nm` suffixes
+> and automatically applies `BC5_UNORM` encoding for normal maps — no manual
+> format selection needed.
+
+### Performance notes
+
+- A full `Data\Textures\` folder is ~8–30 GB.  Process sub-folders separately
+  to manage disk space and resume more easily after interruptions.
+- `realesrgan-ncnn-vulkan` tiles large textures automatically, so GPUs with
+  less VRAM (4 GiB) can run 4× upscaling — it will just be slower.
+- Processing 1 GiB of vanilla textures takes roughly 5–20 minutes depending
+  on GPU tier.
+
+---
+
 ## Weather Mods — Load Order Note
 
 If you use both **True Storms** and **NAC X** or **Vivid Weathers**, place a

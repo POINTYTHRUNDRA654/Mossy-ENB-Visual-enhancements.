@@ -26,6 +26,7 @@ Python 3.8+ — stdlib only.
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -119,6 +120,7 @@ def check(game_dir: Path) -> bool:
         _print_install_hints(game_dir)
 
     print("\n[PASS] All required files found.  You are ready to launch Fallout 4.")
+    check_upscale_tools()
     return True
 
 
@@ -138,6 +140,62 @@ def _print_install_hints(game_dir: Path) -> None:
     print("    F4SE:         https://f4se.silverlock.org/")
     print("    MossyLUT.png: run  python tools/generate_lut.py  then copy the")
     print(f"                  PNG into {game_dir / 'reshade-shaders' / 'Textures'}")
+
+
+# ---------------------------------------------------------------------------
+# AI upscaling tool check (PATH-based, not game-dir-based)
+# ---------------------------------------------------------------------------
+
+#: DDS converters that upscale_textures.py can use.
+_DDS_CONVERTERS = ("texconv", "texconv.exe", "magick", "convert")
+
+#: Real-ESRGAN binary names that upscale_textures.py can use.
+_ESRGAN_BINARIES = ("realesrgan-ncnn-vulkan", "realesrgan-ncnn-vulkan.exe")
+
+
+def check_upscale_tools() -> dict[str, bool]:
+    """Check for AI texture-upscaling tools on the system PATH.
+
+    Prints a summary of which tools are present and where to get missing ones.
+    Returns a dict mapping tool-name → found (bool).
+    """
+    results: dict[str, bool] = {}
+
+    dds_found = next((t for t in _DDS_CONVERTERS if shutil.which(t)), None)
+    esrgan_found = next((t for t in _ESRGAN_BINARIES if shutil.which(t)), None)
+
+    results["dds_converter"] = dds_found is not None
+    results["esrgan_binary"] = esrgan_found is not None
+
+    print()
+    print("  AI texture-upscaling tools (optional — needed for upscale_textures.py)")
+    print(f"  {'Tool':<45}  Status")
+    print(f"  {'-' * 45}  ------")
+
+    if dds_found:
+        print(f"  {'DDS converter (' + dds_found + ')':<45}  ✓  found")
+    else:
+        print(f"  {'DDS converter (texconv / magick / convert)':<45}  ⚠  not found")
+
+    if esrgan_found:
+        print(f"  {'ESRGAN binary (' + esrgan_found + ')':<45}  ✓  found")
+    else:
+        print(f"  {'ESRGAN binary (realesrgan-ncnn-vulkan)':<45}  ⚠  not found")
+
+    if not dds_found or not esrgan_found:
+        print()
+        print("  To use AI texture upscaling (tools/upscale_textures.py):")
+        if not dds_found:
+            print("    texconv:   https://github.com/microsoft/DirectXTex/releases")
+            print("    ImageMagick: https://imagemagick.org/")
+        if not esrgan_found:
+            print(
+                "    Real-ESRGAN: "
+                "https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases"
+            )
+        print("    Model files: see tools/models/README.md")
+
+    return results
 
 
 # ---------------------------------------------------------------------------
