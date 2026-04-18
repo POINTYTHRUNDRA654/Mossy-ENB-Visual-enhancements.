@@ -68,7 +68,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # Lower-case stem suffixes that identify each texture type.
-_NORMAL_SUFFIXES: frozenset[str] = frozenset({"_n", "_normal", "_nm", "_normals"})
+_NORMAL_SUFFIXES: frozenset[str] = frozenset({"_n", "_normal", "_nm"})
 _SPECULAR_SUFFIXES: frozenset[str] = frozenset({"_s", "_spec", "_specular"})
 _GLOW_SUFFIXES: frozenset[str] = frozenset({"_g", "_glow", "_em", "_emissive"})
 

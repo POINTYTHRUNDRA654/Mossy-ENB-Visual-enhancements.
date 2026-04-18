@@ -73,7 +73,7 @@ scattering.
 | **DLSS Enabler** (PureDark, Nexus Mods) | Nvidia RTX GPU | Retrofits DLSS 2/3 into Fallout 4. AI upscaling at 67 % render resolution with better-than-native sharpness. Frees up ~30 % GPU budget for ENB and ReShade. Recommended: set `EnableVSync=false` and `FpsLimit=60.0` in `enblocal.ini`. |
 | **RTX Remix** (Nvidia, open-source) | Nvidia RTX GPU | Full path-traced renderer replacement using Nvidia Omniverse. Community Fallout 4 port is in active development. Replaces ENB entirely when used. |
 | **Chainner + ESRGAN models** (PC tool) | Any GPU | Open-source node-based pipeline for batch-processing all vanilla textures through AI upscaling models. Use the `4x_foolhardy_Remacri` or `4x_NMKD-Superscale` models for Bethesda textures. |
-| **Topaz Gigapixel AI** | Any GPU | Commercial AI upscaler; best quality-per-iteration for individual texture work. |
+| **Topaz Gigapixel AI** | Nvidia GPU (CUDA) / CPU fallback | Commercial AI upscaler; best quality-per-iteration for individual texture work. |
 
 ---
 

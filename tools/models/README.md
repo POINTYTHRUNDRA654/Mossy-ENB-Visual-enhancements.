@@ -98,14 +98,15 @@ python tools/upscale_textures.py \
 
 ## VRAM Budget Guide
 
-| Scale | Typical output res | Minimum VRAM |
-|---|---|---|
-| 2× | 2K (vanilla 1K → 2K) | 4 GiB |
-| 4× | 4K (vanilla 1K → 4K) | 8 GiB |
+| Scale | Typical output res | Recommended VRAM | Notes |
+|---|---|---|---|
+| 2× | 2K (vanilla 1K → 2K) | 4 GiB | Can run on less — tiling handles the overflow |
+| 4× | 4K (vanilla 1K → 4K) | 8 GiB | Works on 4 GiB via Vulkan tiling, but is slower |
 
 The `upscale_textures.py` script uses the `realesrgan-ncnn-vulkan` binary which
-runs inference in Vulkan tiles, so larger-than-VRAM batches are handled
-automatically (at a performance cost).
+runs inference in Vulkan tiles.  This means any GPU with Vulkan support can run
+both scale factors — lower VRAM simply increases processing time as the binary
+handles more tiles in sequence.
 
 ---
 
