@@ -418,3 +418,205 @@ class TestDlssDetection:
         # On any platform, the function must return a str (may be empty).
         name = enb_optimizer._detect_gpu_name()
         assert isinstance(name, str)
+
+
+# ---------------------------------------------------------------------------
+# _calc_memory_budget
+# ---------------------------------------------------------------------------
+
+
+class TestCalcMemoryBudget:
+    @pytest.mark.parametrize(
+        "vram_mib, expected_video, expected_reserved",
+        [
+            (10000, 7680, 512),   # ≥ 8192 → top tier
+            (8192,  7680, 512),   # exactly 8 GiB
+            (7000,  5632, 512),   # ≥ 6144 tier
+            (6144,  5632, 512),   # exactly 6 GiB
+            (5000,  3584, 256),   # ≥ 4096 tier
+            (4096,  3584, 256),   # exactly 4 GiB
+            (3000,  1792, 128),   # ≥ 2048 tier
+            (2048,  1792, 128),   # exactly 2 GiB
+            (1024,  1024, 128),   # fallback tier
+            (0,     1024, 128),   # zero VRAM (detection failure)
+        ],
+    )
+    def test_budget_thresholds(
+        self, vram_mib: int, expected_video: int, expected_reserved: int
+    ) -> None:
+        video, reserved = enb_optimizer._calc_memory_budget(vram_mib)
+        assert video == expected_video
+        assert reserved == expected_reserved
+
+
+# ---------------------------------------------------------------------------
+# Fixture: patched enblocal.ini path
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def patched_local_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """
+    Write a minimal enblocal.ini into a tmp dir and redirect the module-level
+    ENBLOCAL_INI and BACKUP_DIR constants so patch-local tests are isolated.
+    """
+    local_ini = tmp_path / "enblocal.ini"
+    local_ini.write_text(
+        "[GLOBAL]\nAutodetectVideoMemorySize=true\nVideoMemorySizeMb=0\n"
+        "[MEMORY]\nVideoMemorySizeMb=4096\nReservedMemorySizeMb=512\n"
+        "[ENGINE]\nEnableVSync=true\nEnableFpsLimit=false\nFpsLimit=0.0\n",
+        encoding="utf-8",
+    )
+    backup_dir = tmp_path / "backups"
+    monkeypatch.setattr(enb_optimizer, "ENBLOCAL_INI", local_ini)
+    monkeypatch.setattr(enb_optimizer, "BACKUP_DIR", backup_dir)
+    return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# cmd_patch_local
+# ---------------------------------------------------------------------------
+
+
+class TestCmdPatchLocal:
+    def test_auto_vram_writes_values(
+        self,
+        patched_local_paths: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
+        # Simulate 8 GiB GPU
+        monkeypatch.setattr(enb_optimizer, "_detect_vram_mib", lambda: 8192)
+        args = enb_optimizer.build_parser().parse_args(["patch-local", "--auto-vram"])
+        enb_optimizer.cmd_patch_local(args)
+
+        cfg = enb_optimizer._read_ini(enb_optimizer.ENBLOCAL_INI)
+        assert cfg.get("MEMORY", "VideoMemorySizeMb") == "7680"
+        assert cfg.get("MEMORY", "ReservedMemorySizeMb") == "512"
+        assert cfg.get("ENGINE", "EnableVSync") == "false"
+        assert cfg.get("ENGINE", "FpsLimit") == "60.0"
+
+    def test_auto_vram_disables_autodetect(
+        self,
+        patched_local_paths: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(enb_optimizer, "_detect_vram_mib", lambda: 4096)
+        args = enb_optimizer.build_parser().parse_args(["patch-local", "--auto-vram"])
+        enb_optimizer.cmd_patch_local(args)
+
+        cfg = enb_optimizer._read_ini(enb_optimizer.ENBLOCAL_INI)
+        assert cfg.get("GLOBAL", "AutodetectVideoMemorySize") == "false"
+
+    def test_manual_video_mb(
+        self,
+        patched_local_paths: Path,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
+        args = enb_optimizer.build_parser().parse_args(
+            ["patch-local", "--video-mb", "3000", "--reserved-mb", "200"]
+        )
+        enb_optimizer.cmd_patch_local(args)
+
+        cfg = enb_optimizer._read_ini(enb_optimizer.ENBLOCAL_INI)
+        assert cfg.get("MEMORY", "VideoMemorySizeMb") == "3000"
+        assert cfg.get("MEMORY", "ReservedMemorySizeMb") == "200"
+
+    def test_patch_local_creates_backup(self, patched_local_paths: Path) -> None:
+        backup_dir = patched_local_paths / "backups"
+        args = enb_optimizer.build_parser().parse_args(["patch-local", "--auto-vram"])
+        enb_optimizer.cmd_patch_local(args)
+        assert backup_dir.exists()
+        backups = list(backup_dir.glob("*.bak"))
+        assert len(backups) == 1
+
+    def test_patch_local_missing_file_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(enb_optimizer, "ENBLOCAL_INI", tmp_path / "nonexistent.ini")
+        args = enb_optimizer.build_parser().parse_args(["patch-local", "--auto-vram"])
+        with pytest.raises(SystemExit):
+            enb_optimizer.cmd_patch_local(args)
+
+
+# ---------------------------------------------------------------------------
+# Screenshot preset — file existence & content
+# ---------------------------------------------------------------------------
+
+
+class TestScreenshotPreset:
+    def test_screenshot_preset_file_exists(self) -> None:
+        path = enb_optimizer.RESHADE_PRESET_FILES.get("screenshot")
+        assert path is not None, "'screenshot' key missing from RESHADE_PRESET_FILES"
+        assert path.exists(), f"Screenshot preset file not found: {path}"
+
+    def test_screenshot_preset_has_lut_section(self) -> None:
+        path = enb_optimizer.RESHADE_PRESET_FILES["screenshot"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("LUT.fx"), "[LUT.fx] section missing from screenshot preset"
+
+    def test_screenshot_preset_has_dof_section(self) -> None:
+        path = enb_optimizer.RESHADE_PRESET_FILES["screenshot"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("DOF.fx"), "[DOF.fx] section missing from screenshot preset"
+
+    def test_screenshot_preset_has_bloom_section(self) -> None:
+        path = enb_optimizer.RESHADE_PRESET_FILES["screenshot"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("Bloom.fx"), "[Bloom.fx] section missing from screenshot preset"
+
+    def test_screenshot_preset_has_filmgrain_section(self) -> None:
+        path = enb_optimizer.RESHADE_PRESET_FILES["screenshot"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("FilmGrain.fx"), "[FilmGrain.fx] section missing from screenshot preset"
+
+    def test_screenshot_preset_listed(self, capsys: pytest.CaptureFixture) -> None:
+        args = enb_optimizer.build_parser().parse_args(["reshade", "list"])
+        enb_optimizer.cmd_reshade_list(args)
+        out = capsys.readouterr().out
+        assert "screenshot" in out
+
+
+# ---------------------------------------------------------------------------
+# Ultra preset — COMPLEXFIRE / COMPLEXPARTICLES
+# ---------------------------------------------------------------------------
+
+
+class TestUltraPresetComplexEffects:
+    def test_ultra_has_complexfire_section(self) -> None:
+        path = enb_optimizer.PRESET_FILES["ultra"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("COMPLEXFIRE"), "[COMPLEXFIRE] missing from ultra preset"
+
+    def test_ultra_complexfire_enabled(self) -> None:
+        path = enb_optimizer.PRESET_FILES["ultra"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.get("COMPLEXFIRE", "EnableComplexFire") == "true"
+
+    def test_ultra_has_complexparticles_section(self) -> None:
+        path = enb_optimizer.PRESET_FILES["ultra"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.has_section("COMPLEXPARTICLES"), "[COMPLEXPARTICLES] missing from ultra preset"
+
+    def test_ultra_complexparticles_enabled(self) -> None:
+        path = enb_optimizer.PRESET_FILES["ultra"]
+        cfg = enb_optimizer._read_ini(path)
+        assert cfg.get("COMPLEXPARTICLES", "EnableComplexParticles") == "true"
+
+
+# ---------------------------------------------------------------------------
+# LUT texture file
+# ---------------------------------------------------------------------------
+
+
+class TestLutTexture:
+    def test_lut_png_exists(self) -> None:
+        lut_path = enb_optimizer.RESHADE_DIR / "reshade-textures" / "MossyLUT.png"
+        assert lut_path.exists(), f"MossyLUT.png not found at {lut_path}"
+
+    def test_lut_png_is_valid_png(self) -> None:
+        lut_path = enb_optimizer.RESHADE_DIR / "reshade-textures" / "MossyLUT.png"
+        with lut_path.open("rb") as fh:
+            sig = fh.read(8)
+        assert sig == b"\x89PNG\r\n\x1a\n", "MossyLUT.png does not have a valid PNG signature"
+

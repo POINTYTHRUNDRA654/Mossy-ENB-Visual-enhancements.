@@ -77,6 +77,37 @@ scattering.
 
 ---
 
+## Physics & Animation
+
+Realistic physics and animation make ENB's subsurface scattering and particle
+lights land correctly.  Stiff vanilla animations break the illusion that ENB
+works hard to create.
+
+| Mod | What it does |
+|---|---|
+| **Bullet Counted Reload (BCR)** | Magazine-aware reload animations: characters actually retain partial magazines instead of discarding them. Pairs with ENB particle lights on shell casings mid-reload. |
+| **BGSM Material Swapper** | Swaps weapon and armour material files to PBR-ready variants, so ENB's specular and metalness calculations look physically correct on every surface. |
+| **Atomic Muscle — Male Body Replacer** | PBR-capable male body mesh with correctly authored normal maps. ENB's `[SUBSURFACESCATTERING]` section makes skin look translucent and believable instead of plastic. |
+| **CBBE 3BA (3BBB)** | The standard female body framework with full Havok bone-driven physics (breast, belly, butt collisions). ENB SSS works on the same skin normal maps. Requires **BodySlide and Outfit Studio**. |
+| **Havok Physics Fix** | Prevents physics objects from vibrating and exploding at high FPS. Essential when `FpsLimit` is raised above 60 in `enblocal.ini`. |
+| **Realistic Ragdoll Force** | Calibrates ragdoll forces to real-world ballistic data so body reactions look grounded rather than cartoonish, complementing ENB's lighting realism. |
+| **Hit Stop and Stagger** | Adds screen-space feedback (hit-stop, micro-stagger) that interacts believably with ENB's depth-of-field and motion-blur shaders. |
+| **NPCs Travel** | Gives settlers and wanderers realistic travel routines — ensures ENB's exterior volumetric rays and weather interactions are always populated with moving characters. |
+
+### Load Order — Physics Mods
+
+Place physics mods **after** body framework masters in your load order:
+
+```
+CBBE.esp           (or BodyTalk3.esp for males)
+CBBE3BA.esp
+AtomicMuscle.esp
+HavokFix.esp
+RealisticRagdoll.esp
+```
+
+---
+
 ## Weather Mods — Load Order Note
 
 If you use both **True Storms** and **NAC X** or **Vivid Weathers**, place a

@@ -14,6 +14,8 @@ Features
 * Backup the current ``enbseries.ini`` before overwriting it.
 * List, show and apply ReShade presets (reshade sub-command).
 * Detect Nvidia RTX GPUs and recommend DLSS Enabler.
+* Patch ``enblocal.ini`` memory values to match detected GPU VRAM
+  (patch-local sub-command).
 
 Usage
 -----
@@ -22,9 +24,11 @@ Usage
     python enb_optimizer.py list
     python enb_optimizer.py show --preset ultra
     python enb_optimizer.py tune --setting SSAO_SSIL/EnableAmbientOcclusion --value true
+    python enb_optimizer.py patch-local --auto-vram
     python enb_optimizer.py reshade list
     python enb_optimizer.py reshade show --preset balanced
     python enb_optimizer.py reshade apply --preset ultra
+    python enb_optimizer.py reshade apply --preset screenshot
     python enb_optimizer.py reshade apply --auto
 
 Requirements
@@ -50,6 +54,7 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parent
 PRESETS_DIR = REPO_ROOT / "presets"
 DEST_INI = REPO_ROOT / "enbseries.ini"
+ENBLOCAL_INI = REPO_ROOT / "enblocal.ini"
 BACKUP_DIR = REPO_ROOT / "backups"
 
 PRESET_FILES: dict[str, Path] = {
@@ -78,6 +83,7 @@ RESHADE_PRESET_FILES: dict[str, Path] = {
     "performance": RESHADE_PRESETS_DIR / "Mossy_performance.ini",
     "balanced": RESHADE_PRESETS_DIR / "Mossy_balanced.ini",
     "ultra": RESHADE_PRESETS_DIR / "Mossy_ultra.ini",
+    "screenshot": RESHADE_PRESETS_DIR / "Mossy_screenshot.ini",
 }
 
 # ---------------------------------------------------------------------------
@@ -327,6 +333,96 @@ def cmd_tune(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# patch-local sub-command
+# ---------------------------------------------------------------------------
+
+# VRAM-to-memory-budget mapping (MiB).
+# ENB docs recommend leaving ~512 MiB headroom for the OS and other processes.
+_VRAM_BUDGET_TABLE: list[tuple[int, int, int]] = [
+    # (min_vram_mib, video_size_mib, reserved_size_mib)
+    (8192, 7680, 512),
+    (6144, 5632, 512),
+    (4096, 3584, 256),
+    (2048, 1792, 128),
+    (0,    1024, 128),
+]
+
+
+def _calc_memory_budget(vram_mib: int) -> tuple[int, int]:
+    """Return (VideoMemorySizeMb, ReservedMemorySizeMb) for the given VRAM."""
+    for min_vram, video, reserved in _VRAM_BUDGET_TABLE:
+        if vram_mib >= min_vram:
+            return video, reserved
+    return 1024, 128
+
+
+def cmd_patch_local(args: argparse.Namespace) -> None:
+    """
+    Write optimal memory and performance settings into enblocal.ini.
+
+    With --auto-vram the VRAM is detected automatically and the best
+    VideoMemorySizeMb / ReservedMemorySizeMb pair is calculated.
+    EnableVSync, EnableFpsLimit, and FpsLimit are also written.
+    """
+    if not ENBLOCAL_INI.exists():
+        print(f"[ERROR] {ENBLOCAL_INI} not found.")
+        sys.exit(1)
+
+    if args.auto_vram:
+        vram = _detect_vram_mib()
+        video_mb, reserved_mb = _calc_memory_budget(vram)
+        print(f"[AUTO] Detected ~{vram} MiB VRAM → VideoMemorySizeMb={video_mb}, ReservedMemorySizeMb={reserved_mb}")
+    else:
+        # Manual values supplied via --video-mb and --reserved-mb
+        video_mb = args.video_mb
+        reserved_mb = args.reserved_mb
+
+    backup = _backup_local(ENBLOCAL_INI)
+    if backup:
+        print(f"[BACKUP] Existing enblocal.ini backed up to: {backup}")
+
+    cfg = _read_ini(ENBLOCAL_INI)
+
+    # [MEMORY] section
+    if not cfg.has_section("MEMORY"):
+        cfg.add_section("MEMORY")
+    cfg.set("MEMORY", "VideoMemorySizeMb", str(video_mb))
+    cfg.set("MEMORY", "ReservedMemorySizeMb", str(reserved_mb))
+
+    # [GLOBAL] – turn off ENB auto-detect so our values are used
+    if not cfg.has_section("GLOBAL"):
+        cfg.add_section("GLOBAL")
+    cfg.set("GLOBAL", "AutodetectVideoMemorySize", "false")
+
+    # [ENGINE] – recommended frame-rate settings
+    if not cfg.has_section("ENGINE"):
+        cfg.add_section("ENGINE")
+    cfg.set("ENGINE", "EnableVSync", "false")
+    cfg.set("ENGINE", "EnableFpsLimit", "true")
+    cfg.set("ENGINE", "FpsLimit", "60.0")
+
+    _write_ini(cfg, ENBLOCAL_INI)
+
+    print(f"[OK] enblocal.ini patched:")
+    print(f"     VideoMemorySizeMb    = {video_mb}")
+    print(f"     ReservedMemorySizeMb = {reserved_mb}")
+    print(f"     AutodetectVideoMemorySize = false")
+    print(f"     EnableVSync = false  |  EnableFpsLimit = true  |  FpsLimit = 60.0")
+    print("     Restart Fallout 4 for the memory settings to take effect.")
+
+
+def _backup_local(path: Path) -> Optional[Path]:
+    """Create a timestamped backup of enblocal.ini in the backups dir."""
+    if not path.exists():
+        return None
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = BACKUP_DIR / f"enblocal_{timestamp}.ini.bak"
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+# ---------------------------------------------------------------------------
 # ReShade sub-commands
 # ---------------------------------------------------------------------------
 
@@ -450,6 +546,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_tune.add_argument("--value", required=True, help="New value to assign")
 
+    # patch-local
+    p_patch = sub.add_parser(
+        "patch-local",
+        help="Patch enblocal.ini memory/performance values for your GPU",
+    )
+    patch_group = p_patch.add_mutually_exclusive_group(required=True)
+    patch_group.add_argument(
+        "--auto-vram",
+        action="store_true",
+        help="Auto-detect GPU VRAM and calculate optimal memory budget",
+    )
+    patch_group.add_argument(
+        "--video-mb",
+        type=int,
+        metavar="MiB",
+        help="Explicit VideoMemorySizeMb value (requires --reserved-mb)",
+    )
+    p_patch.add_argument(
+        "--reserved-mb",
+        type=int,
+        default=256,
+        metavar="MiB",
+        help="ReservedMemorySizeMb value when using --video-mb (default: 256)",
+    )
+
     # reshade  (sub-command group)
     p_reshade = sub.add_parser("reshade", help="Manage ReShade presets")
     reshade_sub = p_reshade.add_subparsers(dest="reshade_command", required=True)
@@ -494,6 +615,7 @@ def main() -> None:
         "show": cmd_show,
         "apply": cmd_apply,
         "tune": cmd_tune,
+        "patch-local": cmd_patch_local,
     }
     dispatch[args.command](args)
 
