@@ -19,6 +19,7 @@ files by hand.
 - [Installation](#installation)
 - [Preset overview](#preset-overview)
 - [Using the optimizer tool](#using-the-optimizer-tool)
+- [Stacking with ReShade & DLSS](#stacking-with-reshade--dlss)
 - [Manual INI editing](#manual-ini-editing)
 - [Settings reference](#settings-reference)
 - [Performance tips](#performance-tips)
@@ -172,7 +173,107 @@ python enb_optimizer.py tune --setting TONEMAPPING/ToneMappingCurve --value 2
 
 ---
 
-## Manual INI editing
+## Stacking with ReShade & DLSS
+
+ENB handles the bulk of the lighting work.  Two additional layers can push
+realism even further without conflicting with it.
+
+### ReShade — screen-space ray tracing and sharpening
+
+[ReShade](https://reshade.me) is a post-processing injector that loads *after*
+ENB when the proxy is enabled in `enblocal.ini`:
+
+```ini
+[PROXY]
+EnableProxyLibrary=true
+ProxyLibrary=dxgi.dll
+```
+
+This repository ships three curated ReShade presets in `reshade/`:
+
+| Preset | VRAM target | Key effects |
+|---|---|---|
+| `performance` | < 4 GiB | MXAO (16 samples), SMAA, AdaptiveSharpen |
+| `balanced` | 4–8 GiB | MXAO (24 samples) + **iMMERSE RTGI** (AO mode), SMAA, sharpening |
+| `ultra` | 8 GiB+ | MXAO (64 samples, IL) + **iMMERSE RTGI** (full GI), SMAA, sharpening |
+
+**iMMERSE RTGI** adds screen-space ray-traced global illumination — the single
+largest visual upgrade available to any Bethesda game without dedicated RT
+hardware.  It requires [iMMERSE Pro](https://www.patreon.com/mcflypg) (paid
+Patreon).  The free `iMMERSE` pack (MXAO) works standalone and is used in
+all three tiers.
+
+#### Applying a ReShade preset
+
+```bash
+# Apply by name
+python enb_optimizer.py reshade apply --preset balanced
+
+# Auto-detect from GPU VRAM (uses the same thresholds as the ENB --auto flag)
+python enb_optimizer.py reshade apply --auto
+
+# List presets
+python enb_optimizer.py reshade list
+
+# Inspect a preset's settings
+python enb_optimizer.py reshade show --preset ultra
+```
+
+`reshade apply` updates the `PresetPath` key in `reshade/ReShade.ini` and
+creates a backup in `backups/reshade/` before doing so.  Copy the entire
+`reshade/` directory to your Fallout 4 root folder for it to take effect.
+
+#### Required shader packs
+
+Download and place in `reshade-shaders/Shaders/` and `reshade-shaders/Textures/`
+inside your Fallout 4 folder:
+
+| Pack | URL | Cost |
+|---|---|---|
+| **iMMERSE** (MXAO, SMAA, sharpening) | https://github.com/martymcmodding/iMMERSE | Free |
+| **iMMERSE Pro** (RTGI — balanced/ultra presets) | https://www.patreon.com/mcflypg | Paid |
+| **qUINT** (AdaptiveSharpen, DoF) | https://github.com/martymcmodding/qUINT | Free |
+
+---
+
+### DLSS — Nvidia AI upscaling (RTX GPUs only)
+
+Fallout 4 does not natively support DLSS, but the **DLSS Enabler** mod by
+PureDark (available on Nexus Mods) retrofits DLSS 2/3 into the game.  It
+allows you to render at ~67 % resolution and get native-or-better sharpness
+with ~30-40 % more FPS — headroom that can be spent on ENB and ReShade effects.
+
+When the optimizer's `--auto` flag detects an Nvidia RTX GPU it will print a
+reminder:
+
+```
+[DLSS] Nvidia RTX GPU detected: NVIDIA GeForce RTX 3080
+       Install 'DLSS Enabler' by PureDark (Nexus Mods) to add DLSS to Fallout 4.
+       Recommended enblocal.ini: EnableVSync=false, FpsLimit=60.0
+```
+
+Recommended `enblocal.ini` settings when DLSS is active:
+
+```ini
+[ENGINE]
+EnableVSync=false       ; let DLSS/driver handle frame pacing
+FpsLimit=60.0           ; cap to your target refresh rate
+```
+
+---
+
+### RTX Remix (Nvidia, open-source)
+
+[RTX Remix](https://www.nvidia.com/en-us/geforce/rtx-remix/) is an Nvidia
+Omniverse-based modding platform that replaces a game's renderer entirely with
+full path tracing and AI texture upscaling.  A community Fallout 4 port is in
+active development.  When used, it replaces ENB; the two cannot run together.
+
+See [`extras/mod_recommendations.md`](extras/mod_recommendations.md) for a
+full list of recommended AI tools, texture packs and weather mods organised by
+GPU tier.
+
+---
 
 Both `enbseries.ini` and `enblocal.ini` contain detailed inline comments.
 Open either file in any text editor.  Every section and key has a description
@@ -190,7 +291,7 @@ copy-paste sections manually.
 1. **SSAO / HBAO** (`[SSAO_SSIL]`) — contact shadows and surface depth
 2. **Sub-surface scattering** (`[SUBSURFACESCATTERING]`) — skin and foliage
 3. **Tone mapping** (`[TONEMAPPING]`, `ToneMappingCurve=3`) — ACES film curve
-4. **Volumetric rays** (`[VOLUMETRICROYS]`) — god rays
+4. **Volumetric rays** (`[VOLUMETRICRAYS]`) — god rays
 5. **Detailed shadows** (`[DETAILSHADOW]`) — high-res contact shadows
 6. **Eye adaptation** (`[TONEMAPPING]`) — dynamic exposure like a camera iris
 
@@ -231,7 +332,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-All 21 tests should pass with no external dependencies.
+All 35 tests should pass with no external dependencies.
 
 ---
 
@@ -246,9 +347,18 @@ Mossy-ENB-Visual-enhancements/
 │   ├── enbseries_performance.ini
 │   ├── enbseries_balanced.ini
 │   └── enbseries_ultra.ini
+├── reshade/
+│   ├── ReShade.ini            ← Active ReShade config (managed by optimizer)
+│   └── reshade-presets/
+│       ├── Mossy_performance.ini   ← RTGI off
+│       ├── Mossy_balanced.ini      ← RTGI on (AO mode)
+│       └── Mossy_ultra.ini         ← RTGI full GI
+├── extras/
+│   └── mod_recommendations.md ← Curated mod list by GPU tier
 ├── tests/
 │   └── test_enb_optimizer.py
 ├── backups/                   ← Auto-created; timestamped .ini.bak files
+│   └── reshade/               ← ReShade-specific backups
 ├── LICENSE
 └── README.md
 ```
